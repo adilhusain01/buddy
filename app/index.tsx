@@ -286,39 +286,39 @@ export default function TodoListScreen() {
           </View>
         )}
 
-        <Modal
-          visible={showDatePicker}
-          transparent
-          animationType="fade"
-          onRequestClose={() => {
-            setShowDatePicker(false);
-            setShowTimePicker(false);
-          }}
-        >
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => {
+        {Platform.OS === "ios" && (
+          <Modal
+            visible={showDatePicker}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
               setShowDatePicker(false);
               setShowTimePicker(false);
             }}
           >
-            <TouchableOpacity activeOpacity={1}>
-              <View style={styles.datePickerModal}>
-                <Text style={styles.modalTitle}>Set deadline</Text>
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => {
+                setShowDatePicker(false);
+                setShowTimePicker(false);
+              }}
+            >
+              <TouchableOpacity activeOpacity={1}>
+                <View style={styles.datePickerModal}>
+                  <Text style={styles.modalTitle}>Set deadline</Text>
 
-                <ScrollView style={styles.pickerScrollContainer}>
-                  <View style={styles.dateTimePickerContainer}>
-                    <DateTimePicker
-                      value={tempDate}
-                      mode="date"
-                      display={Platform.OS === "ios" ? "spinner" : "calendar"}
-                      onChange={handleDateChange}
-                      minimumDate={new Date()}
-                      textColor="#1e293b"
-                      style={styles.picker}
-                    />
-                    {Platform.OS === "ios" && (
+                  <ScrollView style={styles.pickerScrollContainer}>
+                    <View style={styles.dateTimePickerContainer}>
+                      <DateTimePicker
+                        value={tempDate}
+                        mode="date"
+                        display="spinner"
+                        onChange={handleDateChange}
+                        minimumDate={new Date()}
+                        textColor="#1e293b"
+                        style={styles.picker}
+                      />
                       <DateTimePicker
                         value={tempDate}
                         mode="time"
@@ -331,10 +331,8 @@ export default function TodoListScreen() {
                         textColor="#1e293b"
                         style={styles.picker}
                       />
-                    )}
-                  </View>
+                    </View>
 
-                  {Platform.OS === "ios" && (
                     <TouchableOpacity
                       style={styles.confirmButton}
                       onPress={handleConfirmDateTime}
@@ -347,23 +345,33 @@ export default function TodoListScreen() {
                         <Text style={styles.confirmButtonText}>Confirm</Text>
                       </LinearGradient>
                     </TouchableOpacity>
-                  )}
-                </ScrollView>
+                  </ScrollView>
 
-                <TouchableOpacity
-                  style={styles.clearDateButton}
-                  onPress={() => {
-                    setSelectedDate(null);
-                    setShowDatePicker(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.clearDateText}>Clear deadline</Text>
-                </TouchableOpacity>
-              </View>
+                  <TouchableOpacity
+                    style={styles.clearDateButton}
+                    onPress={() => {
+                      setSelectedDate(null);
+                      setShowDatePicker(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.clearDateText}>Clear deadline</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
             </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+          </Modal>
+        )}
+
+        {Platform.OS === "android" && showDatePicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display="calendar"
+            onChange={handleDateChange}
+            minimumDate={new Date()}
+          />
+        )}
 
         {Platform.OS === "android" && showTimePicker && (
           <DateTimePicker
