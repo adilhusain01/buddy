@@ -63,15 +63,49 @@ export const [TodoProvider, useTodos] = createContextHook(() => {
     });
   }, [saveTodos]);
 
+  const editTodo = useCallback((id: string, title: string, deadline: string | null) => {
+    setTodos((prev) => {
+      const updated = prev.map((todo) =>
+        todo.id === id ? { ...todo, title, deadline } : todo
+      );
+      saveTodos(updated);
+      return updated;
+    });
+  }, [saveTodos]);
+
+  const exportTodos = useCallback(() => {
+    return JSON.stringify(todos, null, 2);
+  }, [todos]);
+
+  const importTodos = useCallback((jsonData: string) => {
+    try {
+      const importedTodos: Todo[] = JSON.parse(jsonData);
+      if (Array.isArray(importedTodos)) {
+        const validTodos = importedTodos.filter((todo) =>
+          todo.id && todo.title && typeof todo.completed === 'boolean'
+        );
+        setTodos(validTodos);
+        saveTodos(validTodos);
+        return { success: true, count: validTodos.length };
+      }
+      return { success: false, error: 'Invalid data format' };
+    } catch (error) {
+      return { success: false, error: 'Failed to parse JSON' };
+    }
+  }, [saveTodos]);
+
   return useMemo(
     () => ({
       todos,
       addTodo,
       toggleTodo,
       deleteTodo,
+      editTodo,
+      exportTodos,
+      importTodos,
       isLoading: todosQuery.isLoading,
     }),
-    [todos, addTodo, toggleTodo, deleteTodo, todosQuery.isLoading]
+    [todos, addTodo, toggleTodo, deleteTodo, editTodo, exportTodos, importTodos, todosQuery.isLoading]
   );
 });
 

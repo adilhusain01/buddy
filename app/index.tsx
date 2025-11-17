@@ -9,24 +9,38 @@ import {
   Platform,
   Modal,
   ScrollView,
+  Alert,
+  Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Plus, Calendar, Trash2, Check, Clock } from "lucide-react-native";
+import { Plus, Calendar, Trash2, Check, Clock, Edit3, Download, Upload, Settings, Sun, Moon } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as DocumentPicker from 'expo-document-picker';
 import { useTodos, useSortedTodos, isExpired } from "@/contexts/TodoContext";
 import { Todo } from "@/types/todo";
+import { useTheme } from "@/contexts/ThemeContext";
+import { Colors } from "@/constants/colors";
 
 export default function TodoListScreen() {
-  const { addTodo, toggleTodo, deleteTodo } = useTodos();
+  const { addTodo, toggleTodo, deleteTodo, editTodo, exportTodos, importTodos } = useTodos();
   const sortedTodos = useSortedTodos();
+  const { isDark, colorScheme, setTheme } = useTheme();
 
   const [inputText, setInputText] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [tempDate, setTempDate] = useState<Date>(new Date());
+  const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [editDate, setEditDate] = useState<Date | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [showEditTimePicker, setShowEditTimePicker] = useState(false);
+  const [editTempDate, setEditTempDate] = useState<Date>(new Date());
 
   const handleAddTodo = useCallback(() => {
     if (inputText.trim()) {
@@ -77,20 +91,13 @@ export default function TodoListScreen() {
     if (!deadline) return "";
 
     const date = new Date(deadline);
-    const now = new Date();
-    const diffMs = date.getTime() - now.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMs < 0) return "Overdue";
-    if (diffHours < 1) return "Due soon";
-    if (diffHours < 24) return `${diffHours}h left`;
-    if (diffDays === 1) return "Tomorrow";
-    if (diffDays < 7) return `${diffDays}d left`;
-
-    return date.toLocaleDateString("en-US", {
+    return date.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
     });
   };
 
@@ -140,14 +147,116 @@ export default function TodoListScreen() {
     }
   };
 
+  const handleEditTodo = useCallback((todo: Todo) => {
+    setEditingTodo(todo);
+    setEditText(todo.title);
+    setEditDate(todo.deadline ? new Date(todo.deadline) : null);
+    setShowEditModal(true);
+  }, []);
+
+  const handleSaveEdit = useCallback(() => {
+    if (editingTodo && editText.trim()) {
+      if (Platform.OS !== "web") {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      editTodo(editingTodo.id, editText.trim(), editDate?.toISOString() || null);
+      setShowEditModal(false);
+      setEditingTodo(null);
+      setEditText("");
+      setEditDate(null);
+    }
+  }, [editingTodo, editText, editDate, editTodo]);
+
+  const handleExport = useCallback(async () => {
+    try {
+      const data = exportTodos();
+      if (Platform.OS === 'web') {
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `buddy-tasks-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        await Share.share({
+          message: data,
+          title: 'Export Tasks',
+        });
+      }
+    } catch (error) {
+      Alert.alert('Export Failed', 'Could not export tasks.');
+    }
+  }, [exportTodos]);
+
+  const handleImport = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: false,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const response = await fetch(result.assets[0].uri);
+        const text = await response.text();
+        const importResult = importTodos(text);
+
+        if (importResult.success) {
+          Alert.alert('Import Successful', `Imported ${importResult.count} tasks.`);
+        } else {
+          Alert.alert('Import Failed', importResult.error || 'Unknown error');
+        }
+      }
+    } catch (error) {
+      Alert.alert('Import Failed', 'Could not import tasks.');
+    }
+  }, [importTodos]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(isDark ? 'light' : 'dark');
+  }, [isDark, setTheme]);
+
+  const handleEditDateChange = (_event: any, date?: Date) => {
+    if (date) {
+      setEditTempDate(date);
+      if (Platform.OS === "android") {
+        setShowEditDatePicker(false);
+        setTimeout(() => {
+          setShowEditTimePicker(true);
+        }, 100);
+      }
+    } else if (Platform.OS === "android") {
+      setShowEditDatePicker(false);
+    }
+  };
+
+  const handleEditTimeChange = (_event: any, date?: Date) => {
+    setShowEditTimePicker(false);
+    if (date) {
+      const combined = new Date(editTempDate);
+      combined.setHours(date.getHours(), date.getMinutes(), 0, 0);
+      setEditDate(combined);
+    }
+  };
+
+  const openEditDatePicker = () => {
+    if (Platform.OS === "android") {
+      setEditTempDate(editDate || new Date());
+      setShowEditDatePicker(true);
+    }
+  };
+
   const renderTodoItem = useCallback(
     ({ item }: { item: Todo }) => {
       const isItemExpired = isExpired(item.deadline);
       const shouldStrikethrough = item.completed || isItemExpired;
       const urgencyColor = getUrgencyColor(item);
+      const colors = Colors[colorScheme];
 
       return (
-        <View style={styles.todoItem}>
+        <View style={[styles.todoItem, { backgroundColor: colors.surfaceSecondary }]}>
           <TouchableOpacity
             style={[styles.checkbox, { borderColor: urgencyColor }]}
             onPress={() => handleToggleTodo(item.id)}
@@ -165,7 +274,7 @@ export default function TodoListScreen() {
               style={[
                 styles.todoTitle,
                 shouldStrikethrough && styles.todoTitleCompleted,
-                { color: shouldStrikethrough ? "#94a3b8" : "#1e293b" },
+                { color: shouldStrikethrough ? colors.textMuted : colors.text },
               ]}
             >
               {item.title}
@@ -181,25 +290,33 @@ export default function TodoListScreen() {
           </View>
 
           <TouchableOpacity
+            onPress={() => handleEditTodo(item)}
+            style={styles.editButton}
+            activeOpacity={0.7}
+          >
+            <Edit3 size={18} color={colors.textSecondary} strokeWidth={2} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
             onPress={() => handleDeleteTodo(item.id)}
             style={styles.deleteButton}
             activeOpacity={0.7}
           >
-            <Trash2 size={20} color="#94a3b8" strokeWidth={2} />
+            <Trash2 size={18} color={colors.textMuted} strokeWidth={2} />
           </TouchableOpacity>
         </View>
       );
     },
-    [handleToggleTodo, handleDeleteTodo]
+    [handleToggleTodo, handleDeleteTodo, handleEditTodo, colorScheme]
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <View style={styles.emptyIconContainer}>
-        <Check size={64} color="#cbd5e1" strokeWidth={1.5} />
+      <View style={[styles.emptyIconContainer, { backgroundColor: colors.surface }]}>
+        <Check size={64} color={colors.borderAccent} strokeWidth={1.5} />
       </View>
-      <Text style={styles.emptyTitle}>No todos yet</Text>
-      <Text style={styles.emptySubtitle}>Add your first task to get started</Text>
+      <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>No todos yet</Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>Add your first task to get started</Text>
     </View>
   );
 
@@ -208,22 +325,53 @@ export default function TodoListScreen() {
     setShowDatePicker(true);
   };
 
+  const colors = Colors[colorScheme];
+
   return (
-    <LinearGradient colors={["#f8fafc", "#e0f2fe"]} style={styles.container}>
+    <LinearGradient colors={colors.gradient as any} style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Buddy</Text>
-          <Text style={styles.headerSubtitle}>
-            {sortedTodos.length} {sortedTodos.length === 1 ? "task" : "tasks"}
-          </Text>
+          <View style={styles.headerLeft}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Buddy</Text>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+              {sortedTodos.length} {sortedTodos.length === 1 ? "task" : "tasks"}
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={toggleTheme}
+              activeOpacity={0.7}
+            >
+              {isDark ? (
+                <Sun size={22} color={colors.text} strokeWidth={2} />
+              ) : (
+                <Moon size={22} color={colors.text} strokeWidth={2} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={handleExport}
+              activeOpacity={0.7}
+            >
+              <Download size={22} color={colors.text} strokeWidth={2} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={handleImport}
+              activeOpacity={0.7}
+            >
+              <Upload size={22} color={colors.text} strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.inputContainer}>
-          <View style={styles.inputWrapper}>
+          <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { color: colors.text }]}
               placeholder="Add a new task..."
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={colors.textMuted}
               value={inputText}
               onChangeText={setInputText}
               onSubmitEditing={handleAddTodo}
@@ -232,14 +380,14 @@ export default function TodoListScreen() {
             <TouchableOpacity
               style={[
                 styles.dateButton,
-                selectedDate && styles.dateButtonActive,
+                selectedDate && { backgroundColor: colors.primary + '20' },
               ]}
               onPress={openDatePicker}
               activeOpacity={0.7}
             >
               <Calendar
                 size={20}
-                color={selectedDate ? "#0ea5e9" : "#64748b"}
+                color={selectedDate ? colors.primary : colors.textSecondary}
                 strokeWidth={2}
               />
             </TouchableOpacity>
@@ -251,7 +399,7 @@ export default function TodoListScreen() {
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={inputText.trim() ? ["#0ea5e9", "#0284c7"] : ["#cbd5e1", "#cbd5e1"]}
+              colors={inputText.trim() ? [colors.primary, colors.primaryDark] : [colors.borderAccent, colors.borderAccent] as any}
               style={styles.addButtonGradient}
             >
               <Plus size={24} color="#fff" strokeWidth={2.5} />
@@ -269,10 +417,10 @@ export default function TodoListScreen() {
         />
 
         {selectedDate && (
-          <View style={styles.selectedDateContainer}>
+          <View style={[styles.selectedDateContainer, { backgroundColor: colors.primary + '20' }]}>
             <View style={styles.selectedDateContent}>
-              <Clock size={16} color="#0ea5e9" strokeWidth={2} />
-              <Text style={styles.selectedDateText}>
+              <Clock size={16} color={colors.primary} strokeWidth={2} />
+              <Text style={[styles.selectedDateText, { color: colors.primary }]}>
                 {formatSelectedDateTime(selectedDate)}
               </Text>
             </View>
@@ -281,7 +429,7 @@ export default function TodoListScreen() {
               style={styles.clearSelectedDate}
               activeOpacity={0.7}
             >
-              <Text style={styles.clearSelectedDateText}>Clear</Text>
+              <Text style={[styles.clearSelectedDateText, { color: colors.primary }]}>Clear</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -305,8 +453,8 @@ export default function TodoListScreen() {
               }}
             >
               <TouchableOpacity activeOpacity={1}>
-                <View style={styles.datePickerModal}>
-                  <Text style={styles.modalTitle}>Set deadline</Text>
+                <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Set deadline</Text>
 
                   <ScrollView style={styles.pickerScrollContainer}>
                     <View style={styles.dateTimePickerContainer}>
@@ -316,7 +464,7 @@ export default function TodoListScreen() {
                         display="spinner"
                         onChange={handleDateChange}
                         minimumDate={new Date()}
-                        textColor="#1e293b"
+                        textColor={colors.text}
                         style={styles.picker}
                       />
                       <DateTimePicker
@@ -328,7 +476,7 @@ export default function TodoListScreen() {
                             setTempDate(date);
                           }
                         }}
-                        textColor="#1e293b"
+                        textColor={colors.text}
                         style={styles.picker}
                       />
                     </View>
@@ -339,7 +487,7 @@ export default function TodoListScreen() {
                       activeOpacity={0.8}
                     >
                       <LinearGradient
-                        colors={["#0ea5e9", "#0284c7"]}
+                        colors={[colors.primary, colors.primaryDark] as any}
                         style={styles.confirmButtonGradient}
                       >
                         <Text style={styles.confirmButtonText}>Confirm</Text>
@@ -355,7 +503,7 @@ export default function TodoListScreen() {
                     }}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.clearDateText}>Clear deadline</Text>
+                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
@@ -382,6 +530,147 @@ export default function TodoListScreen() {
             onChange={handleTimeChange}
           />
         )}
+
+        {showEditModal && editingTodo && (
+          <Modal
+            visible={showEditModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              setShowEditModal(false);
+              setEditingTodo(null);
+            }}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => {
+                setShowEditModal(false);
+                setEditingTodo(null);
+              }}
+            >
+              <TouchableOpacity activeOpacity={1}>
+                <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
+
+                  <TextInput
+                    style={[styles.input, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 16, marginBottom: 16 }]}
+                    placeholder="Task name"
+                    placeholderTextColor={colors.textMuted}
+                    value={editText}
+                    onChangeText={setEditText}
+                    autoFocus
+                  />
+
+                  {Platform.OS === "ios" ? (
+                    <ScrollView style={styles.pickerScrollContainer}>
+                      <View style={styles.dateTimePickerContainer}>
+                        <DateTimePicker
+                          value={editDate || new Date()}
+                          mode="date"
+                          display="spinner"
+                          onChange={(_, date) => {
+                            if (date) {
+                              const combined = editDate ? new Date(editDate) : new Date();
+                              combined.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+                              setEditDate(combined);
+                            }
+                          }}
+                          minimumDate={new Date()}
+                          textColor={colors.text}
+                          style={styles.picker}
+                        />
+                        <DateTimePicker
+                          value={editDate || new Date()}
+                          mode="time"
+                          display="spinner"
+                          onChange={(_, date) => {
+                            if (date) {
+                              const combined = editDate ? new Date(editDate) : new Date();
+                              combined.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                              setEditDate(combined);
+                            }
+                          }}
+                          textColor={colors.text}
+                          style={styles.picker}
+                        />
+                      </View>
+                    </ScrollView>
+                  ) : (
+                    <View>
+                      <TouchableOpacity
+                        style={[styles.androidDateButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        onPress={openEditDatePicker}
+                        activeOpacity={0.7}
+                      >
+                        <Calendar size={20} color={colors.primary} strokeWidth={2} />
+                        <Text style={[styles.androidDateButtonText, { color: colors.text }]}>
+                          {editDate ? editDate.toLocaleDateString() : "Set date"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {editDate && (
+                        <Text style={[styles.selectedEditDate, { color: colors.textSecondary }]}>
+                          Selected: {editDate.toLocaleString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                            hour12: true,
+                          })}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.confirmButton}
+                    onPress={handleSaveEdit}
+                    activeOpacity={0.8}
+                  >
+                    <LinearGradient
+                      colors={[colors.primary, colors.primaryDark] as any}
+                      style={styles.confirmButtonGradient}
+                    >
+                      <Text style={styles.confirmButtonText}>Save Changes</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.clearDateButton}
+                    onPress={() => {
+                      setEditDate(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
+
+        {Platform.OS === "android" && showEditDatePicker && (
+          <DateTimePicker
+            value={editTempDate}
+            mode="date"
+            display="calendar"
+            onChange={handleEditDateChange}
+            minimumDate={new Date()}
+          />
+        )}
+
+        {Platform.OS === "android" && showEditTimePicker && (
+          <DateTimePicker
+            value={editTempDate}
+            mode="time"
+            is24Hour={false}
+            display="default"
+            onChange={handleEditTimeChange}
+          />
+        )}
       </SafeAreaView>
     </LinearGradient>
   );
@@ -398,6 +687,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  headerButton: {
+    padding: 8,
+    borderRadius: 8,
   },
   headerTitle: {
     fontSize: 36,
@@ -520,6 +824,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600" as const,
   },
+  editButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
   deleteButton: {
     padding: 8,
     marginLeft: 8,
@@ -641,5 +949,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700" as const,
     color: "#fff",
+  },
+  androidDateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 12,
+  },
+  androidDateButtonText: {
+    fontSize: 16,
+    fontWeight: "500" as const,
+  },
+  selectedEditDate: {
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: "center",
   },
 });
