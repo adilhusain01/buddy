@@ -535,7 +535,7 @@ export default function TodoListScreen() {
                       colors={['#E2BA6F', '#D4A853'] as any}
                       style={styles.confirmButtonGradient}
                     >
-                      <Text style={styles.confirmButtonText}>Create</Text>
+                      <Text style={styles.confirmButtonText}>Done</Text>
                     </LinearGradient>
                   </TouchableOpacity>
 
