@@ -52,7 +52,39 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "@bittingz/expo-widgets",
+        {
+          "ios": {
+            "enabled": true,
+            "widgets": [
+              {
+                "name": "BuddyTaskWidget",
+                "displayName": "Buddy Tasks",
+                "description": "View your tasks at a glance",
+                "families": ["medium", "large"],
+                "intentTimelineProvider": false
+              }
+            ]
+          },
+          "android": {
+            "enabled": true,
+            "widgets": [
+              {
+                "name": "BuddyTaskWidget",
+                "displayName": "Buddy Tasks",
+                "description": "View your tasks at a glance",
+                "minWidth": 146,
+                "minHeight": 146,
+                "targetCellWidth": 2,
+                "targetCellHeight": 2,
+                "resizeMode": "horizontal|vertical"
+              }
+            ]
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

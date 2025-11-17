@@ -124,7 +124,7 @@ export default function TodoListScreen() {
     if (date) {
       const combined = new Date(tempDate);
       combined.setHours(date.getHours(), date.getMinutes(), 0, 0);
-      setSelectedDate(combined);
+      setTempDate(combined);
       if (Platform.OS !== "web") {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
@@ -488,7 +488,9 @@ export default function TodoListScreen() {
                           display="spinner"
                           onChange={(_, date) => {
                             if (date) {
-                              setTempDate(date);
+                              const combined = new Date(tempDate);
+                              combined.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                              setTempDate(combined);
                             }
                           }}
                           textColor={colors.text}
