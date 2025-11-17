@@ -18,6 +18,8 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { useTodos, useSortedTodos, isExpired } from "@/contexts/TodoContext";
 import { Todo } from "@/types/todo";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -41,6 +43,7 @@ export default function TodoListScreen() {
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const [showEditTimePicker, setShowEditTimePicker] = useState(false);
   const [editTempDate, setEditTempDate] = useState<Date>(new Date());
+  const [showCreateDateModal, setShowCreateDateModal] = useState(false);
 
   const handleAddTodo = useCallback(() => {
     if (inputText.trim()) {
@@ -138,12 +141,11 @@ export default function TodoListScreen() {
   };
 
   const handleConfirmDateTime = () => {
-    if (Platform.OS === "ios") {
-      setSelectedDate(tempDate);
-      setShowDatePicker(false);
-      if (Platform.OS !== "web") {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      }
+    setSelectedDate(tempDate);
+    setShowCreateDateModal(false);
+    setShowDatePicker(false);
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
 
@@ -170,21 +172,31 @@ export default function TodoListScreen() {
   const handleExport = useCallback(async () => {
     try {
       const data = exportTodos();
+      const filename = `buddy-tasks-${new Date().toISOString().split('T')[0]}.json`;
+
       if (Platform.OS === 'web') {
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `buddy-tasks-${new Date().toISOString().split('T')[0]}.json`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
-        await Share.share({
-          message: data,
-          title: 'Export Tasks',
-        });
+        // Mobile platforms - create file and share
+        const fileUri = FileSystem.documentDirectory + filename;
+        await FileSystem.writeAsStringAsync(fileUri, data);
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/json',
+            dialogTitle: 'Export Tasks',
+          });
+        } else {
+          Alert.alert('Export Complete', `Tasks exported to ${filename}`);
+        }
       }
     } catch (error) {
       Alert.alert('Export Failed', 'Could not export tasks.');
@@ -194,23 +206,32 @@ export default function TodoListScreen() {
   const handleImport = useCallback(async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+        type: ['application/json', 'text/json', 'text/plain'],
         copyToCacheDirectory: false,
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        const response = await fetch(result.assets[0].uri);
-        const text = await response.text();
+        let text: string;
+
+        if (Platform.OS === 'web') {
+          const response = await fetch(result.assets[0].uri);
+          text = await response.text();
+        } else {
+          // Mobile platforms - read file using FileSystem
+          text = await FileSystem.readAsStringAsync(result.assets[0].uri);
+        }
+
         const importResult = importTodos(text);
 
         if (importResult.success) {
-          Alert.alert('Import Successful', `Imported ${importResult.count} tasks.`);
+          Alert.alert('Import Successful', `Successfully imported ${importResult.count} tasks!`);
         } else {
-          Alert.alert('Import Failed', importResult.error || 'Unknown error');
+          Alert.alert('Import Failed', importResult.error || 'The file format is not valid. Please select a JSON file exported from Buddy.');
         }
       }
     } catch (error) {
-      Alert.alert('Import Failed', 'Could not import tasks.');
+      console.error('Import error:', error);
+      Alert.alert('Import Failed', 'Could not read the selected file. Please make sure it\'s a valid JSON file exported from Buddy.');
     }
   }, [importTodos]);
 
@@ -322,7 +343,11 @@ export default function TodoListScreen() {
 
   const openDatePicker = () => {
     setTempDate(selectedDate || new Date());
-    setShowDatePicker(true);
+    if (Platform.OS === "ios") {
+      setShowCreateDateModal(true);
+    } else {
+      setShowDatePicker(true);
+    }
   };
 
   const colors = Colors[colorScheme];
@@ -434,22 +459,20 @@ export default function TodoListScreen() {
           </View>
         )}
 
-        {Platform.OS === "ios" && (
+        {showCreateDateModal && (
           <Modal
-            visible={showDatePicker}
+            visible={showCreateDateModal}
             transparent
             animationType="fade"
             onRequestClose={() => {
-              setShowDatePicker(false);
-              setShowTimePicker(false);
+              setShowCreateDateModal(false);
             }}
           >
             <TouchableOpacity
               style={styles.modalOverlay}
               activeOpacity={1}
               onPress={() => {
-                setShowDatePicker(false);
-                setShowTimePicker(false);
+                setShowCreateDateModal(false);
               }}
             >
               <TouchableOpacity activeOpacity={1}>
@@ -471,7 +494,7 @@ export default function TodoListScreen() {
                         value={tempDate}
                         mode="time"
                         display="spinner"
-                        onChange={(e, date) => {
+                        onChange={(_, date) => {
                           if (date) {
                             setTempDate(date);
                           }
@@ -499,7 +522,7 @@ export default function TodoListScreen() {
                     style={styles.clearDateButton}
                     onPress={() => {
                       setSelectedDate(null);
-                      setShowDatePicker(false);
+                      setShowCreateDateModal(false);
                     }}
                     activeOpacity={0.7}
                   >
@@ -554,12 +577,14 @@ export default function TodoListScreen() {
                   <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
 
                   <TextInput
-                    style={[styles.input, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 16, marginBottom: 16 }]}
+                    style={[styles.editTaskInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
                     placeholder="Task name"
                     placeholderTextColor={colors.textMuted}
                     value={editText}
                     onChangeText={setEditText}
                     autoFocus
+                    multiline={false}
+                    selectTextOnFocus={true}
                   />
 
                   {Platform.OS === "ios" ? (
@@ -967,5 +992,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 16,
     textAlign: "center",
+  },
+  editTaskInput: {
+    fontSize: 16,
+    fontWeight: "500" as const,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    minHeight: 50,
   },
 });
