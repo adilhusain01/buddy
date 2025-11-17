@@ -468,8 +468,7 @@ export default function TodoListScreen() {
             >
               <TouchableOpacity activeOpacity={1}>
                 <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
-                  <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1 }}>
-                    <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Deadline</Text>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Deadline</Text>
 
                     {Platform.OS === "ios" ? (
                     <ScrollView style={styles.pickerScrollContainer}>
@@ -540,17 +539,16 @@ export default function TodoListScreen() {
                     </LinearGradient>
                   </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.clearDateButton}
-                      onPress={() => {
-                        setSelectedDate(null);
-                        setShowCreateDateModal(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
-                    </TouchableOpacity>
-                  </ScrollView>
+                  <TouchableOpacity
+                    style={styles.clearDateButton}
+                    onPress={() => {
+                      setSelectedDate(null);
+                      setShowCreateDateModal(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                  </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
@@ -597,8 +595,7 @@ export default function TodoListScreen() {
             >
               <TouchableOpacity activeOpacity={1}>
                 <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
-                  <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1 }}>
-                    <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
 
                   <TextInput
                     style={[styles.editTaskInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -686,16 +683,15 @@ export default function TodoListScreen() {
                     </LinearGradient>
                   </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.clearDateButton}
-                      onPress={() => {
-                        setEditDate(null);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
-                    </TouchableOpacity>
-                  </ScrollView>
+                  <TouchableOpacity
+                    style={styles.clearDateButton}
+                    onPress={() => {
+                      setEditDate(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                  </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
@@ -921,13 +917,11 @@ const styles = StyleSheet.create({
     padding: 24,
     width: "100%",
     maxWidth: 400,
-    maxHeight: "80%",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 24,
     elevation: 10,
-    overflow: "hidden",
   },
   modalTitle: {
     fontSize: 22,
