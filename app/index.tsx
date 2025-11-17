@@ -13,12 +13,12 @@ import {
   Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Plus, Calendar, Trash2, Check, Clock, Edit3, Download, Upload, Settings, Sun, Moon } from "lucide-react-native";
+import { Plus, Calendar, Trash2, Check, Edit3, Download, Upload, Sun, Moon } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useTodos, useSortedTodos, isExpired } from "@/contexts/TodoContext";
 import { Todo } from "@/types/todo";
@@ -104,15 +104,6 @@ export default function TodoListScreen() {
     });
   };
 
-  const formatSelectedDateTime = (date: Date | null): string => {
-    if (!date) return "";
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  };
 
   const handleDateChange = (_event: any, date?: Date) => {
     if (date) {
@@ -185,21 +176,28 @@ export default function TodoListScreen() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
-        // Mobile platforms - create file and share
-        const fileUri = FileSystem.documentDirectory + filename;
-        await FileSystem.writeAsStringAsync(fileUri, data);
+        // Mobile platforms - create file and share using new API
+        try {
+          const file = new File(Paths.cache, filename);
+          file.write(data);
 
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: 'application/json',
-            dialogTitle: 'Export Tasks',
-          });
-        } else {
-          Alert.alert('Export Complete', `Tasks exported to ${filename}`);
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(file.uri, {
+              mimeType: 'application/json',
+              dialogTitle: 'Export Buddy Tasks',
+              UTI: 'public.data',
+            });
+          } else {
+            Alert.alert('Export Complete', `Tasks exported to ${filename}`);
+          }
+        } catch (fileError) {
+          console.error('File operation failed:', fileError);
+          Alert.alert('Export Failed', 'Could not create export file. Please try again.');
         }
       }
     } catch (error) {
-      Alert.alert('Export Failed', 'Could not export tasks.');
+      console.error('Export error:', error);
+      Alert.alert('Export Failed', 'Could not export tasks. Please try again.');
     }
   }, [exportTodos]);
 
@@ -207,7 +205,7 @@ export default function TodoListScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/json', 'text/json', 'text/plain'],
-        copyToCacheDirectory: false,
+        copyToCacheDirectory: true, // Important for Android content URI handling
       });
 
       if (!result.canceled && result.assets?.[0]) {
@@ -217,9 +215,23 @@ export default function TodoListScreen() {
           const response = await fetch(result.assets[0].uri);
           text = await response.text();
         } else {
-          // Mobile platforms - read file using FileSystem
-          text = await FileSystem.readAsStringAsync(result.assets[0].uri);
+          // Mobile platforms - use new File API which handles content URIs properly
+          try {
+            const file = new File(result.assets[0].uri);
+            text = file.textSync();
+          } catch (fileError) {
+            console.error('File read error:', fileError);
+            // Fallback for content URIs that might need copying
+            const tempFile = new File(Paths.cache, 'import-temp.json');
+            const originalFile = new File(result.assets[0].uri);
+            originalFile.copy(tempFile);
+            text = tempFile.textSync();
+            tempFile.delete(); // Clean up
+          }
         }
+
+        // Clean up any BOM or whitespace that might cause parsing issues
+        text = text.replace(/^\uFEFF/, "").trim();
 
         const importResult = importTodos(text);
 
@@ -343,11 +355,7 @@ export default function TodoListScreen() {
 
   const openDatePicker = () => {
     setTempDate(selectedDate || new Date());
-    if (Platform.OS === "ios") {
-      setShowCreateDateModal(true);
-    } else {
-      setShowDatePicker(true);
-    }
+    setShowCreateDateModal(true);
   };
 
   const colors = Colors[colorScheme];
@@ -405,14 +413,14 @@ export default function TodoListScreen() {
             <TouchableOpacity
               style={[
                 styles.dateButton,
-                selectedDate && { backgroundColor: colors.primary + '20' },
+                { backgroundColor: '#E2BA6F' },
               ]}
               onPress={openDatePicker}
               activeOpacity={0.7}
             >
               <Calendar
                 size={20}
-                color={selectedDate ? colors.primary : colors.textSecondary}
+                color="#fff"
                 strokeWidth={2}
               />
             </TouchableOpacity>
@@ -424,7 +432,7 @@ export default function TodoListScreen() {
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={inputText.trim() ? [colors.primary, colors.primaryDark] : [colors.borderAccent, colors.borderAccent] as any}
+              colors={['#E2BA6F', '#D4A853'] as any}
               style={styles.addButtonGradient}
             >
               <Plus size={24} color="#fff" strokeWidth={2.5} />
@@ -441,23 +449,6 @@ export default function TodoListScreen() {
           showsVerticalScrollIndicator={false}
         />
 
-        {selectedDate && (
-          <View style={[styles.selectedDateContainer, { backgroundColor: colors.primary + '20' }]}>
-            <View style={styles.selectedDateContent}>
-              <Clock size={16} color={colors.primary} strokeWidth={2} />
-              <Text style={[styles.selectedDateText, { color: colors.primary }]}>
-                {formatSelectedDateTime(selectedDate)}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setSelectedDate(null)}
-              style={styles.clearSelectedDate}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.clearSelectedDateText, { color: colors.primary }]}>Clear</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         {showCreateDateModal && (
           <Modal
@@ -477,57 +468,89 @@ export default function TodoListScreen() {
             >
               <TouchableOpacity activeOpacity={1}>
                 <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
-                  <Text style={[styles.modalTitle, { color: colors.text }]}>Set deadline</Text>
+                  <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1 }}>
+                    <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Deadline</Text>
 
-                  <ScrollView style={styles.pickerScrollContainer}>
-                    <View style={styles.dateTimePickerContainer}>
-                      <DateTimePicker
-                        value={tempDate}
-                        mode="date"
-                        display="spinner"
-                        onChange={handleDateChange}
-                        minimumDate={new Date()}
-                        textColor={colors.text}
-                        style={styles.picker}
-                      />
-                      <DateTimePicker
-                        value={tempDate}
-                        mode="time"
-                        display="spinner"
-                        onChange={(_, date) => {
-                          if (date) {
-                            setTempDate(date);
-                          }
+                    {Platform.OS === "ios" ? (
+                    <ScrollView style={styles.pickerScrollContainer}>
+                      <View style={styles.dateTimePickerContainer}>
+                        <DateTimePicker
+                          value={tempDate}
+                          mode="date"
+                          display="spinner"
+                          onChange={handleDateChange}
+                          minimumDate={new Date()}
+                          textColor={colors.text}
+                          style={styles.picker}
+                        />
+                        <DateTimePicker
+                          value={tempDate}
+                          mode="time"
+                          display="spinner"
+                          onChange={(_, date) => {
+                            if (date) {
+                              setTempDate(date);
+                            }
+                          }}
+                          textColor={colors.text}
+                          style={styles.picker}
+                        />
+                      </View>
+                    </ScrollView>
+                  ) : (
+                    <View>
+                      <TouchableOpacity
+                        style={[styles.androidDateButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        onPress={() => {
+                          setShowDatePicker(true);
                         }}
-                        textColor={colors.text}
-                        style={styles.picker}
-                      />
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.confirmButton}
-                      onPress={handleConfirmDateTime}
-                      activeOpacity={0.8}
-                    >
-                      <LinearGradient
-                        colors={[colors.primary, colors.primaryDark] as any}
-                        style={styles.confirmButtonGradient}
+                        activeOpacity={0.7}
                       >
-                        <Text style={styles.confirmButtonText}>Confirm</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </ScrollView>
+                        <Calendar size={20} color="#E2BA6F" strokeWidth={2} />
+                        <Text style={[styles.androidDateButtonText, { color: colors.text }]}>
+                          {tempDate ? tempDate.toLocaleDateString() : "Set date"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {tempDate && (
+                        <Text style={[styles.selectedEditDate, { color: colors.textSecondary }]}>
+                          Selected: {tempDate.toLocaleString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                            hour12: true,
+                          })}
+                        </Text>
+                      )}
+                    </View>
+                  )}
 
                   <TouchableOpacity
-                    style={styles.clearDateButton}
-                    onPress={() => {
-                      setSelectedDate(null);
-                      setShowCreateDateModal(false);
-                    }}
-                    activeOpacity={0.7}
+                    style={styles.confirmButton}
+                    onPress={handleConfirmDateTime}
+                    activeOpacity={0.8}
                   >
-                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                    <LinearGradient
+                      colors={['#E2BA6F', '#D4A853'] as any}
+                      style={styles.confirmButtonGradient}
+                    >
+                      <Text style={styles.confirmButtonText}>Create</Text>
+                    </LinearGradient>
                   </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.clearDateButton}
+                      onPress={() => {
+                        setSelectedDate(null);
+                        setShowCreateDateModal(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
@@ -574,7 +597,8 @@ export default function TodoListScreen() {
             >
               <TouchableOpacity activeOpacity={1}>
                 <View style={[styles.datePickerModal, { backgroundColor: colors.surfaceSecondary }]}>
-                  <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
+                  <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 1 }}>
+                    <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Task</Text>
 
                   <TextInput
                     style={[styles.editTaskInput, { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -628,7 +652,7 @@ export default function TodoListScreen() {
                         onPress={openEditDatePicker}
                         activeOpacity={0.7}
                       >
-                        <Calendar size={20} color={colors.primary} strokeWidth={2} />
+                        <Calendar size={20} color="#E2BA6F" strokeWidth={2} />
                         <Text style={[styles.androidDateButtonText, { color: colors.text }]}>
                           {editDate ? editDate.toLocaleDateString() : "Set date"}
                         </Text>
@@ -655,22 +679,23 @@ export default function TodoListScreen() {
                     activeOpacity={0.8}
                   >
                     <LinearGradient
-                      colors={[colors.primary, colors.primaryDark] as any}
+                      colors={['#E2BA6F', '#D4A853'] as any}
                       style={styles.confirmButtonGradient}
                     >
                       <Text style={styles.confirmButtonText}>Save Changes</Text>
                     </LinearGradient>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.clearDateButton}
-                    onPress={() => {
-                      setEditDate(null);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.clearDateButton}
+                      onPress={() => {
+                        setEditDate(null);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.clearDateText, { color: colors.textSecondary }]}>Clear deadline</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
                 </View>
               </TouchableOpacity>
             </TouchableOpacity>
@@ -896,12 +921,13 @@ const styles = StyleSheet.create({
     padding: 24,
     width: "100%",
     maxWidth: 400,
-    maxHeight: "85%",
+    maxHeight: "80%",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 24,
     elevation: 10,
+    overflow: "hidden",
   },
   modalTitle: {
     fontSize: 22,
