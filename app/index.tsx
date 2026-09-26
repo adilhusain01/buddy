@@ -10,20 +10,20 @@ import {
   Modal,
   ScrollView,
   Alert,
-  Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Plus, Calendar, Trash2, Check, Edit3, Download, Upload, Sun, Moon } from "lucide-react-native";
+import { Plus, Calendar, Trash2, Check, Edit3, Download, Upload, Sun, Moon, Bell } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { useTodos, useSortedTodos, isExpired } from "@/contexts/TodoContext";
-import { Todo } from "@/types/todo";
+import { useTodos, useSortedTodos, getTodoStateInfo } from "@/contexts/TodoContext";
+import { Todo, NotificationSettings } from "@/types/todo";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Colors } from "@/constants/colors";
+import { NotificationSettings as NotificationSettingsModal } from "@/components/NotificationSettings";
 
 export default function TodoListScreen() {
   const { addTodo, toggleTodo, deleteTodo, editTodo, exportTodos, importTodos } = useTodos();
@@ -39,22 +39,28 @@ export default function TodoListScreen() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editText, setEditText] = useState("");
   const [editDate, setEditDate] = useState<Date | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const [showEditTimePicker, setShowEditTimePicker] = useState(false);
   const [editTempDate, setEditTempDate] = useState<Date>(new Date());
   const [showCreateDateModal, setShowCreateDateModal] = useState(false);
 
-  const handleAddTodo = useCallback(() => {
+  // Notification states
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [currentNotifications, setCurrentNotifications] = useState<NotificationSettings>();
+  const [notificationTodoTitle, setNotificationTodoTitle] = useState("");
+  const [notificationTodoDeadline, setNotificationTodoDeadline] = useState<string | null>(null);
+
+  const handleAddTodo = useCallback(async () => {
     if (inputText.trim()) {
       if (Platform.OS !== "web") {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-      addTodo(inputText.trim(), selectedDate?.toISOString() || null);
+      await addTodo(inputText.trim(), selectedDate?.toISOString() || null, currentNotifications);
       setInputText("");
       setSelectedDate(null);
+      setCurrentNotifications(undefined);
     }
-  }, [inputText, selectedDate, addTodo]);
+  }, [inputText, selectedDate, currentNotifications, addTodo]);
 
   const handleToggleTodo = useCallback(
     (id: string) => {
@@ -76,33 +82,7 @@ export default function TodoListScreen() {
     [deleteTodo]
   );
 
-  const getUrgencyColor = (todo: Todo): string => {
-    if (todo.completed) return "#94a3b8";
-    if (!todo.deadline) return "#64748b";
-
-    const deadline = new Date(todo.deadline);
-    const now = new Date();
-    const hoursLeft = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-    if (hoursLeft < 0) return "#ef4444";
-    if (hoursLeft < 24) return "#f97316";
-    if (hoursLeft < 72) return "#eab308";
-    return "#10b981";
-  };
-
-  const formatDeadline = (deadline: string | null): string => {
-    if (!deadline) return "";
-
-    const date = new Date(deadline);
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
+  // Remove old functions - using getTodoStateInfo now
 
 
   const handleDateChange = (_event: any, date?: Date) => {
@@ -147,22 +127,23 @@ export default function TodoListScreen() {
     setShowEditModal(true);
   }, []);
 
-  const handleSaveEdit = useCallback(() => {
+  const handleSaveEdit = useCallback(async () => {
     if (editingTodo && editText.trim()) {
       if (Platform.OS !== "web") {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-      editTodo(editingTodo.id, editText.trim(), editDate?.toISOString() || null);
+      await editTodo(editingTodo.id, editText.trim(), editDate?.toISOString() || null, currentNotifications);
       setShowEditModal(false);
       setEditingTodo(null);
       setEditText("");
       setEditDate(null);
+      setCurrentNotifications(undefined);
     }
-  }, [editingTodo, editText, editDate, editTodo]);
+  }, [editingTodo, editText, editDate, currentNotifications, editTodo]);
 
   const handleExport = useCallback(async () => {
     try {
-      const data = exportTodos();
+      const data = await exportTodos();
       const filename = `buddy-tasks-${new Date().toISOString().split('T')[0]}.json`;
 
       if (Platform.OS === 'web') {
@@ -197,7 +178,8 @@ export default function TodoListScreen() {
       }
     } catch (error) {
       console.error('Export error:', error);
-      Alert.alert('Export Failed', 'Could not export tasks. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Could not export tasks. Please try again.';
+      Alert.alert('Export Failed', errorMessage);
     }
   }, [exportTodos]);
 
@@ -233,10 +215,24 @@ export default function TodoListScreen() {
         // Clean up any BOM or whitespace that might cause parsing issues
         text = text.replace(/^\uFEFF/, "").trim();
 
-        const importResult = importTodos(text);
+        const importResult = await importTodos(text);
 
         if (importResult.success) {
-          Alert.alert('Import Successful', `Successfully imported ${importResult.count} tasks!`);
+          let successMessage = `Successfully imported ${importResult.count} tasks!`;
+
+          if (importResult.notificationsRestored !== undefined) {
+            successMessage += `\nNotifications restored: ${importResult.notificationsRestored}`;
+          }
+
+          if (importResult.warnings && importResult.warnings.length > 0) {
+            successMessage += `\n\nWarnings:\n${importResult.warnings.join('\n')}`;
+          }
+
+          if (importResult.metadata) {
+            successMessage += `\n\nImported from: ${importResult.metadata.devicePlatform} (${importResult.metadata.exportDate.split('T')[0]})`;
+          }
+
+          Alert.alert('Import Successful', successMessage);
         } else {
           Alert.alert('Import Failed', importResult.error || 'The file format is not valid. Please select a JSON file exported from Buddy.');
         }
@@ -250,6 +246,32 @@ export default function TodoListScreen() {
   const toggleTheme = useCallback(() => {
     setTheme(isDark ? 'light' : 'dark');
   }, [isDark, setTheme]);
+
+  const openNotificationSettings = useCallback((forCreation: boolean = false) => {
+    if (forCreation) {
+      setNotificationTodoTitle(inputText);
+      setNotificationTodoDeadline(selectedDate?.toISOString() || null);
+      setCurrentNotifications(undefined);
+    } else if (editingTodo) {
+      setNotificationTodoTitle(editText);
+      setNotificationTodoDeadline(editDate?.toISOString() || null);
+      setCurrentNotifications(editingTodo.notifications);
+    }
+    setShowNotificationSettings(true);
+  }, [inputText, selectedDate, editingTodo, editText, editDate]);
+
+  const handleNotificationSave = useCallback((notifications: NotificationSettings) => {
+    setCurrentNotifications(notifications);
+    setShowNotificationSettings(false);
+
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, []);
+
+  const hasActiveNotifications = useCallback((todo: Todo) => {
+    return !!(todo.notifications?.early?.enabled || todo.notifications?.repeat?.enabled);
+  }, []);
 
   const handleEditDateChange = (_event: any, date?: Date) => {
     if (date) {
@@ -283,20 +305,18 @@ export default function TodoListScreen() {
 
   const renderTodoItem = useCallback(
     ({ item }: { item: Todo }) => {
-      const isItemExpired = isExpired(item.deadline);
-      const shouldStrikethrough = item.completed || isItemExpired;
-      const urgencyColor = getUrgencyColor(item);
+      const stateInfo = getTodoStateInfo(item);
       const colors = Colors[colorScheme];
 
       return (
         <View style={[styles.todoItem, { backgroundColor: colors.surfaceSecondary }]}>
           <TouchableOpacity
-            style={[styles.checkbox, { borderColor: urgencyColor }]}
+            style={[styles.checkbox, { borderColor: stateInfo.urgencyColor }]}
             onPress={() => handleToggleTodo(item.id)}
             activeOpacity={0.7}
           >
             {item.completed && (
-              <View style={[styles.checkboxInner, { backgroundColor: urgencyColor }]}>
+              <View style={[styles.checkboxInner, { backgroundColor: stateInfo.urgencyColor }]}>
                 <Check size={16} color="#fff" strokeWidth={3} />
               </View>
             )}
@@ -306,18 +326,34 @@ export default function TodoListScreen() {
             <Text
               style={[
                 styles.todoTitle,
-                shouldStrikethrough && styles.todoTitleCompleted,
-                { color: shouldStrikethrough ? colors.textMuted : colors.text },
+                stateInfo.shouldStrikethrough && styles.todoTitleCompleted,
+                stateInfo.shouldBold && styles.todoTitleBold,
+                {
+                  color: stateInfo.shouldStrikethrough
+                    ? colors.textMuted
+                    : stateInfo.urgencyColor === "#ef4444"
+                      ? stateInfo.urgencyColor
+                      : colors.text
+                },
               ]}
             >
               {item.title}
             </Text>
-            {item.deadline && (
+            {(stateInfo.deadlineLabel || hasActiveNotifications(item)) && (
               <View style={styles.deadlineContainer}>
-                <Calendar size={12} color={urgencyColor} strokeWidth={2} />
-                <Text style={[styles.deadlineText, { color: urgencyColor }]}>
-                  {formatDeadline(item.deadline)}
-                </Text>
+                {stateInfo.deadlineLabel && (
+                  <>
+                    <Calendar size={12} color={stateInfo.urgencyColor} strokeWidth={2} />
+                    <Text style={[styles.deadlineText, { color: stateInfo.urgencyColor }]}>
+                      {stateInfo.deadlineLabel}
+                    </Text>
+                  </>
+                )}
+                {hasActiveNotifications(item) && (
+                  <View style={styles.notificationIndicator}>
+                    <Bell size={12} color="#E2BA6F" strokeWidth={2} />
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -340,7 +376,7 @@ export default function TodoListScreen() {
         </View>
       );
     },
-    [handleToggleTodo, handleDeleteTodo, handleEditTodo, colorScheme]
+    [handleToggleTodo, handleDeleteTodo, handleEditTodo, hasActiveNotifications, colorScheme]
   );
 
   const renderEmptyState = () => (
@@ -412,13 +448,27 @@ export default function TodoListScreen() {
             />
             <TouchableOpacity
               style={[
-                styles.dateButton,
+                styles.calendarButton,
                 { backgroundColor: '#E2BA6F' },
               ]}
               onPress={openDatePicker}
               activeOpacity={0.7}
             >
               <Calendar
+                size={20}
+                color="#fff"
+                strokeWidth={2}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.dateButton,
+                { backgroundColor: '#E2BA6F' },
+              ]}
+              onPress={() => openNotificationSettings(true)}
+              activeOpacity={0.7}
+            >
+              <Bell
                 size={20}
                 color="#fff"
                 strokeWidth={2}
@@ -610,6 +660,18 @@ export default function TodoListScreen() {
                     selectTextOnFocus={true}
                   />
 
+                  {/* Notification Button */}
+                  <TouchableOpacity
+                    style={[styles.notificationButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => openNotificationSettings(false)}
+                    activeOpacity={0.7}
+                  >
+                    <Bell size={16} color={editingTodo?.notifications?.early?.enabled || editingTodo?.notifications?.repeat?.enabled ? colors.primary : colors.textMuted} strokeWidth={2} />
+                    <Text style={[styles.notificationButtonText, { color: colors.text }]}>
+                      {editingTodo?.notifications?.early?.enabled || editingTodo?.notifications?.repeat?.enabled ? 'Notifications Set' : 'Set Notifications'}
+                    </Text>
+                  </TouchableOpacity>
+
                   {Platform.OS === "ios" ? (
                     <ScrollView style={styles.pickerScrollContainer}>
                       <View style={styles.dateTimePickerContainer}>
@@ -719,6 +781,16 @@ export default function TodoListScreen() {
             onChange={handleEditTimeChange}
           />
         )}
+
+        {/* Notification Settings Modal */}
+        <NotificationSettingsModal
+          visible={showNotificationSettings}
+          onClose={() => setShowNotificationSettings(false)}
+          onSave={handleNotificationSave}
+          initialSettings={currentNotifications}
+          todoTitle={notificationTodoTitle}
+          todoDeadline={notificationTodoDeadline}
+        />
       </SafeAreaView>
     </LinearGradient>
   );
@@ -793,6 +865,11 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
   },
+  calendarButton: {
+    padding: 8,
+    borderRadius: 8,
+    marginRight: 8,
+  },
   dateButtonActive: {
     backgroundColor: "#e0f2fe",
   },
@@ -852,6 +929,7 @@ const styles = StyleSheet.create({
   },
   todoContent: {
     flex: 1,
+    gap: 4,
   },
   todoTitle: {
     fontSize: 16,
@@ -862,11 +940,13 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
     opacity: 0.6,
   },
+  todoTitleBold: {
+    fontWeight: "700" as const,
+  },
   deadlineContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
-    gap: 6,
+    gap: 4,
   },
   deadlineText: {
     fontSize: 13,
@@ -1024,5 +1104,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16,
     minHeight: 50,
+  },
+  notificationIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
+  notificationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 12,
+  },
+  notificationButtonText: {
+    fontSize: 16,
+    fontWeight: "500" as const,
   },
 });

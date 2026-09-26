@@ -6,6 +6,8 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { TodoProvider } from "@/contexts/TodoContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { useNotificationHandler } from "@/services/NotificationService";
+import * as Notifications from 'expo-notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -21,9 +23,19 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const { initializeNotifications, handleNotificationResponse } = useNotificationHandler();
+
   useEffect(() => {
     SplashScreen.hideAsync();
-  }, []);
+
+    // Initialize notifications on app start
+    initializeNotifications();
+
+    // Set up notification response listener
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
+
+    return () => subscription.remove();
+  }, [handleNotificationResponse, initializeNotifications]);
 
   return (
     <QueryClientProvider client={queryClient}>

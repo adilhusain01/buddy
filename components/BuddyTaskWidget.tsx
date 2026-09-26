@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { WidgetProvider } from '@bittingz/expo-widgets';
+// import { WidgetProvider } from '@bittingz/expo-widgets'; // Optional widget dependency
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Todo } from '@/types/todo';
 
@@ -13,14 +13,7 @@ interface WidgetProps {
 export default function BuddyTaskWidget({ family = 'medium' }: WidgetProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
 
-  useEffect(() => {
-    loadTodos();
-    // Set up widget refresh interval
-    const interval = setInterval(loadTodos, 60000); // Refresh every minute
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadTodos = async () => {
+  const loadTodos = useCallback(async () => {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
@@ -32,7 +25,14 @@ export default function BuddyTaskWidget({ family = 'medium' }: WidgetProps) {
     } catch (error) {
       console.error('Widget failed to load todos:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadTodos();
+    // Set up widget refresh interval
+    const interval = setInterval(loadTodos, 60000); // Refresh every minute
+    return () => clearInterval(interval);
+  }, [loadTodos]);
 
   const sortTodosByDeadline = (todos: Todo[]): Todo[] => {
     const now = new Date();
@@ -82,7 +82,7 @@ export default function BuddyTaskWidget({ family = 'medium' }: WidgetProps) {
   const visibleTodos = todos.slice(0, maxTasks);
 
   return (
-    <WidgetProvider>
+    // <WidgetProvider> // Optional widget provider commented out
       <View style={[styles.container, family === 'large' && styles.largeContainer]}>
         <View style={styles.header}>
           <Text style={styles.title}>Buddy Tasks</Text>
@@ -93,7 +93,7 @@ export default function BuddyTaskWidget({ family = 'medium' }: WidgetProps) {
 
         <ScrollView style={styles.taskList} showsVerticalScrollIndicator={false}>
           {visibleTodos.length > 0 ? (
-            visibleTodos.map((todo, index) => (
+            visibleTodos.map((todo) => (
               <View key={todo.id} style={styles.taskItem}>
                 <View style={styles.taskContent}>
                   <View
@@ -134,7 +134,7 @@ export default function BuddyTaskWidget({ family = 'medium' }: WidgetProps) {
           </Text>
         )}
       </View>
-    </WidgetProvider>
+    // </WidgetProvider> // Optional widget provider commented out
   );
 }
 
